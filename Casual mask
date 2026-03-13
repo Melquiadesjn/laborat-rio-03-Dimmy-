@@ -1,0 +1,97 @@
+"""
+Tarefa 1 — Implementando a Máscara Causal (Look-Ahead Mask)
+
+Fundamento:
+    No treinamento paralelizado em GPUs, a frase de destino completa entra no
+    Decoder de uma só vez. Para impedir que a posição i "veja" a posição i+1
+    (olhar para o futuro), injetamos uma máscara M antes do Softmax:
+
+        Attention(Q, K, V) = softmax( QK^T / sqrt(d_k) + M ) * V
+
+    Onde M[i, j] = 0       se j <= i  (passado/presente — permitido)
+              M[i, j] = -inf   se j >  i  (futuro — bloqueado)
+
+    Quando -inf entra no Softmax, exp(-inf) = 0, zerando aquelas posições.
+"""
+
+import numpy as np
+
+
+def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    """Softmax numericamente estável."""
+    x_shifted = x - np.max(x, axis=axis, keepdims=True)
+    exp_x = np.exp(x_shifted)
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+
+def create_causal_mask(seq_len: int) -> np.ndarray:
+    """
+    Retorna uma máscara causal quadrada [seq_len, seq_len].
+
+    - Triangular inferior + diagonal principal → 0       (atenção permitida)
+    - Triangular superior                      → -inf    (atenção bloqueada)
+
+    Exemplo para seq_len=4:
+        [[ 0., -inf, -inf, -inf],
+         [ 0.,   0., -inf, -inf],
+         [ 0.,   0.,   0., -inf],
+         [ 0.,   0.,   0.,   0.]]
+    """
+    mask = np.full((seq_len, seq_len), -np.inf)
+    # np.tril preenche a triangular inferior (inclusive diagonal) com o valor dado
+    mask = np.tril(np.zeros((seq_len, seq_len))) + np.triu(mask, k=1)
+    return mask
+
+
+def demo_causal_mask(seq_len: int = 5, d_k: int = 64, seed: int = 42) -> None:
+    """
+    Prova Real:
+        1. Gera Q e K aleatórias.
+        2. Calcula scores = QK^T / sqrt(d_k).
+        3. Adiciona a máscara M.
+        4. Aplica Softmax.
+        5. Verifica que toda posição futura tem probabilidade 0.0.
+    """
+    rng = np.random.default_rng(seed)
+
+    Q = rng.standard_normal((seq_len, d_k))   # (seq_len, d_k)
+    K = rng.standard_normal((seq_len, d_k))   # (seq_len, d_k)
+
+    # Scores brutos escalados
+    scores = Q @ K.T / np.sqrt(d_k)           # (seq_len, seq_len)
+
+    # Máscara causal
+    M = create_causal_mask(seq_len)
+
+    # Scores mascarados
+    masked_scores = scores + M
+
+    # Distribuição de atenção
+    attention_weights = softmax(masked_scores, axis=-1)
+
+    print("=" * 60)
+    print("TAREFA 1 — Look-Ahead Mask (Mascaramento Causal)")
+    print("=" * 60)
+    print(f"\nParâmetros: seq_len={seq_len}, d_k={d_k}\n")
+
+    print("Máscara M (0 = permitido, -inf = bloqueado):")
+    print(M)
+
+    print("\nScores brutos QK^T / sqrt(d_k):")
+    print(np.round(scores, 4))
+
+    print("\nScores após adição da máscara (M + scores):")
+    print(np.round(masked_scores, 4))
+
+    print("\nPesos de atenção após Softmax:")
+    print(np.round(attention_weights, 6))
+
+    # Verificação: posições futuras (triangular superior) devem ser 0.0
+    upper = np.triu(attention_weights, k=1)
+    assert np.allclose(upper, 0.0), "FALHA: posições futuras não foram zeradas!"
+    print("\n✓ Verificação OK: todas as posições futuras têm probabilidade 0.0")
+    print("  (exp(-inf) = 0 → Softmax anula o futuro)\n")
+
+
+if __name__ == "__main__":
+    demo_causal_mask()
