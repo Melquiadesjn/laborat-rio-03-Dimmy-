@@ -1,0 +1,189 @@
+"""
+Tarefa 3 — Simulando o Loop de Inferência Auto-Regressivo
+
+Fundamento:
+    Durante a inferência, o Decoder gera tokens um a um. A cada passo t:
+
+        1. A sequência gerada até t-1 entra no Decoder.
+        2. O Decoder aplica Self-Attention (com máscara causal) sobre si mesmo.
+        3. O Decoder aplica Cross-Attention sobre a saída do Encoder.
+        4. O vetor final [d_model] passa por uma projeção linear → [V_size].
+        5. Softmax emite uma distribuição de probabilidades sobre o vocabulário.
+        6. argmax seleciona o próximo token.
+        7. O token é acrescentado à sequência; o loop recomeça.
+        8. O loop para ao gerar <EOS>.
+
+    Este arquivo implementa um Mock do Decoder para simular esse fluxo.
+"""
+
+import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# Vocabulário fictício (V = 10.000 tokens)
+# ---------------------------------------------------------------------------
+VOCAB_SIZE = 10_000
+
+# Tokens especiais com índices fixos
+TOKEN_START = "<START>"
+TOKEN_EOS   = "<EOS>"
+EOS_INDEX   = 42          # índice arbitrário reservado para <EOS>
+
+# Mapa índice → palavra fictícia
+_VOCAB: dict[int, str] = {i: f"palavra_{i}" for i in range(VOCAB_SIZE)}
+_VOCAB[0]         = TOKEN_START
+_VOCAB[EOS_INDEX] = TOKEN_EOS
+
+# Mapa palavra → índice
+_TOKEN2IDX: dict[str, int] = {v: k for k, v in _VOCAB.items()}
+
+
+def softmax(x: np.ndarray) -> np.ndarray:
+    """Softmax numericamente estável (vetor 1-D)."""
+    x_shifted = x - np.max(x)
+    exp_x = np.exp(x_shifted)
+    return exp_x / exp_x.sum()
+
+
+def generate_next_token(
+    current_sequence: list[str],
+    encoder_out: np.ndarray,
+    rng: np.random.Generator,
+    d_model: int = 512,
+    eos_pressure: float = 0.0,
+) -> np.ndarray:
+    """
+    Mock do passo de geração do Decoder.
+
+    Simula a passagem da sequência atual pelo Decoder e retorna um vetor
+    de probabilidades sobre o vocabulário inteiro (tamanho VOCAB_SIZE).
+
+    Em um Transformer real, este passo envolveria:
+        - Embedding + Positional Encoding da sequência atual
+        - N blocos de Decoder (Self-Attention + Cross-Attention + FFN)
+        - Projeção linear [d_model → VOCAB_SIZE]
+        - Softmax
+
+    Aqui usamos valores aleatórios para simular esse vetor final,
+    com `eos_pressure` controlando a probabilidade crescente de <EOS>.
+
+    Args:
+        current_sequence : lista de tokens gerados até agora
+        encoder_out      : saída do Encoder (não utilizada no mock, mas
+                           reflete a assinatura real da função)
+        rng              : gerador de números aleatórios (reprodutibilidade)
+        d_model          : dimensão do modelo
+        eos_pressure     : probabilidade extra injetada no índice <EOS>
+
+    Returns:
+        probs : np.ndarray de shape (VOCAB_SIZE,) somando 1.0
+    """
+    # Simula logits brutos (projeção linear d_model → VOCAB_SIZE)
+    logits = rng.standard_normal(VOCAB_SIZE)
+
+    # Aumenta artificialmente a probabilidade de <EOS> conforme a sequência cresce
+    logits[EOS_INDEX] += eos_pressure
+
+    return softmax(logits)
+
+
+def run_autoregressive_loop(
+    encoder_out: np.ndarray,
+    initial_sequence: list[str] | None = None,
+    max_steps: int = 20,
+    seed: int = 99,
+) -> list[str]:
+    """
+    Loop de inferência auto-regressiva.
+
+    A cada iteração:
+        1. Chama generate_next_token com a sequência atual.
+        2. Aplica argmax → índice do próximo token.
+        3. Converte o índice em palavra e acrescenta à sequência.
+        4. Para imediatamente se <EOS> for gerado.
+
+    Args:
+        encoder_out      : saída fictícia do Encoder
+        initial_sequence : tokens iniciais (padrão: ["<START>"])
+        max_steps        : limite de segurança para evitar loop infinito
+        seed             : semente para reprodutibilidade
+
+    Returns:
+        A sequência final de tokens (incluindo <EOS> se gerado).
+    """
+    rng = np.random.default_rng(seed)
+
+    if initial_sequence is None:
+        initial_sequence = [TOKEN_START]
+
+    sequence = list(initial_sequence)
+
+    print("=" * 60)
+    print("TAREFA 3 — Loop de Inferência Auto-Regressiva")
+    print("=" * 60)
+    print(f"\nVocabulário: {VOCAB_SIZE} tokens  |  <EOS> index: {EOS_INDEX}")
+    print(f"Sequência inicial: {sequence}\n")
+
+    step = 0
+    while step < max_steps:
+        step += 1
+
+        # Pressão crescente de EOS a cada passo (simula fim natural da frase)
+        eos_pressure = step * 0.5
+
+        # ---- Passo central do Decoder (mock) ----
+        probs = generate_next_token(
+            current_sequence=sequence,
+            encoder_out=encoder_out,
+            rng=rng,
+            eos_pressure=eos_pressure,
+        )
+
+        # argmax → índice do token mais provável
+        next_idx  = int(np.argmax(probs))
+        next_word = _VOCAB[next_idx]
+
+        # Diagnóstico por passo
+        print(f"  Passo {step:02d} | argmax={next_idx:5d} | "
+              f"p={probs[next_idx]:.4f} | token='{next_word}'")
+
+        # Acrescenta o novo token à sequência
+        sequence.append(next_word)
+
+        # Condição de parada
+        if next_word == TOKEN_EOS:
+            print(f"\n  → Token <EOS> detectado. Geração encerrada no passo {step}.")
+            break
+    else:
+        print(f"\n  → Limite de {max_steps} passos atingido sem <EOS>.")
+
+    print(f"\nFrase gerada (completa):\n  {' '.join(sequence)}\n")
+    return sequence
+
+
+def demo_autoregressive(seed: int = 99) -> None:
+    """Demonstra o loop com um encoder_out fictício."""
+    rng = np.random.default_rng(0)
+
+    batch_size  = 1
+    seq_len_enc = 10
+    d_model     = 512
+
+    encoder_out = rng.standard_normal((batch_size, seq_len_enc, d_model))
+
+    final_sequence = run_autoregressive_loop(
+        encoder_out=encoder_out,
+        initial_sequence=["<START>", "O", "rato"],
+        max_steps=20,
+        seed=seed,
+    )
+
+    # Verificações básicas
+    assert final_sequence[0] == "<START>", "Sequência deve começar com <START>"
+    assert TOKEN_EOS in final_sequence, "Sequência deve conter <EOS>"
+    assert final_sequence[-1] == TOKEN_EOS, "<EOS> deve ser o último token"
+    print("✓ Verificação OK: sequência bem-formada com <EOS> ao final.\n")
+
+
+if __name__ == "__main__":
+    demo_autoregressive()
