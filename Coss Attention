@@ -1,0 +1,158 @@
+"""
+Tarefa 2 — A Ponte Encoder-Decoder (Cross-Attention)
+
+Fundamento:
+    No Self-Attention, Q, K e V derivam da mesma sequência. No Cross-Attention,
+    as fronteiras são cruzadas:
+
+        Q  ←  decoder_state  (o que o Decoder já gerou)
+        K  ←  encoder_output (memória da frase de entrada)
+        V  ←  encoder_output (memória da frase de entrada)
+
+    Equação:
+        Attention(Q, K, V) = softmax( QK^T / sqrt(d_k) ) * V
+
+    Nota: não aplicamos máscara causal aqui, pois o Decoder deve ter acesso
+    irrestrito a toda a saída do Encoder (frase de origem completa).
+
+Dimensões do exemplo (tradução FR → EN):
+    encoder_output : [batch=1, seq_len_fr=10, d_model=512]
+    decoder_state  : [batch=1, seq_len_en=4,  d_model=512]
+"""
+
+import numpy as np
+
+
+def softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    """Softmax numericamente estável."""
+    x_shifted = x - np.max(x, axis=axis, keepdims=True)
+    exp_x = np.exp(x_shifted)
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+
+def scaled_dot_product_attention(
+    Q: np.ndarray,
+    K: np.ndarray,
+    V: np.ndarray,
+    mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Scaled Dot-Product Attention genérico.
+
+    Args:
+        Q : (batch, seq_q, d_k)
+        K : (batch, seq_k, d_k)
+        V : (batch, seq_k, d_v)
+        mask: opcional, adicionada antes do Softmax
+
+    Returns:
+        output  : (batch, seq_q, d_v)
+        weights : (batch, seq_q, seq_k)  — pesos de atenção (para análise)
+    """
+    d_k = Q.shape[-1]
+
+    # scores: (batch, seq_q, seq_k)
+    scores = np.matmul(Q, K.transpose(0, 2, 1)) / np.sqrt(d_k)
+
+    if mask is not None:
+        scores = scores + mask
+
+    weights = softmax(scores, axis=-1)
+    output = np.matmul(weights, V)   # (batch, seq_q, d_v)
+
+    return output, weights
+
+
+def cross_attention(
+    encoder_out: np.ndarray,
+    decoder_state: np.ndarray,
+    W_q: np.ndarray,
+    W_k: np.ndarray,
+    W_v: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Cross-Attention Encoder → Decoder.
+
+    Args:
+        encoder_out   : (batch, seq_enc, d_model)  — saída do Encoder
+        decoder_state : (batch, seq_dec, d_model)  — estado atual do Decoder
+        W_q           : (d_model, d_k)             — projeção da Query
+        W_k           : (d_model, d_k)             — projeção das Keys
+        W_v           : (d_model, d_v)             — projeção dos Values
+
+    Returns:
+        output  : (batch, seq_dec, d_v)
+        weights : (batch, seq_dec, seq_enc)
+    """
+    # Q vem do Decoder — "o que estou procurando?"
+    Q = decoder_state @ W_q   # (batch, seq_dec, d_k)
+
+    # K e V vêm do Encoder — "o que eu sei sobre a entrada?"
+    K = encoder_out @ W_k     # (batch, seq_enc, d_k)
+    V = encoder_out @ W_v     # (batch, seq_enc, d_v)
+
+    # Sem máscara causal: o Decoder vê a frase de origem por inteiro
+    output, weights = scaled_dot_product_attention(Q, K, V, mask=None)
+
+    return output, weights
+
+
+def demo_cross_attention(seed: int = 7) -> None:
+    """Demonstra o fluxo completo do Cross-Attention com tensores fictícios."""
+    rng = np.random.default_rng(seed)
+
+    # Hiperparâmetros
+    batch_size   = 1
+    seq_len_fr   = 10    # tokens na frase em francês (Encoder)
+    seq_len_en   = 4     # tokens já gerados em inglês (Decoder)
+    d_model      = 512
+    d_k          = 64    # dimensão de Q e K
+    d_v          = 64    # dimensão de V (e da saída)
+
+    # --- Tensores fictícios ---
+    encoder_output = rng.standard_normal((batch_size, seq_len_fr, d_model))
+    decoder_state  = rng.standard_normal((batch_size, seq_len_en, d_model))
+
+    # --- Matrizes de projeção (pesos arbitrários) ---
+    W_q = rng.standard_normal((d_model, d_k)) * 0.02
+    W_k = rng.standard_normal((d_model, d_k)) * 0.02
+    W_v = rng.standard_normal((d_model, d_v)) * 0.02
+
+    # --- Cross-Attention ---
+    output, weights = cross_attention(
+        encoder_out=encoder_output,
+        decoder_state=decoder_state,
+        W_q=W_q, W_k=W_k, W_v=W_v,
+    )
+
+    print("=" * 60)
+    print("TAREFA 2 — Cross-Attention (Ponte Encoder-Decoder)")
+    print("=" * 60)
+    print(f"\nEncoder output shape : {encoder_output.shape}  "
+          f"[batch, seq_fr, d_model]")
+    print(f"Decoder state shape  : {decoder_state.shape}  "
+          f"[batch, seq_en, d_model]")
+    print(f"W_q shape            : {W_q.shape}")
+    print(f"W_k shape            : {W_k.shape}")
+    print(f"W_v shape            : {W_v.shape}")
+
+    print(f"\nPesos de atenção — shape: {weights.shape}")
+    print("  (cada linha = 1 token do Decoder; cada coluna = 1 token do Encoder)")
+    print(np.round(weights[0], 4))
+
+    print(f"\nSaída do Cross-Attention — shape: {output.shape}")
+    print("  (contexto enriquecido: vetor de 64 dims por token gerado)")
+
+    # Verificações básicas
+    assert output.shape  == (batch_size, seq_len_en, d_v),  "Shape da saída incorreto"
+    assert weights.shape == (batch_size, seq_len_en, seq_len_fr), "Shape dos pesos incorreto"
+    assert np.allclose(weights.sum(axis=-1), 1.0), "Pesos não somam 1"
+
+    print("\n✓ Verificação OK:")
+    print(f"  - Saída shape correta   : {output.shape}")
+    print(f"  - Pesos shape correto   : {weights.shape}")
+    print(f"  - Cada linha soma 1.0   : {np.round(weights[0].sum(axis=-1), 6)}\n")
+
+
+if __name__ == "__main__":
+    demo_cross_attention()
