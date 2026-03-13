@@ -1,0 +1,56 @@
+"""
+main.py — Laboratório 3: Implementando o Decoder
+
+Executa as três tarefas em sequência, demonstrando os blocos
+matemáticos centrais do Decoder de um Transformer.
+
+Uso:
+    python main.py
+"""
+
+import numpy as np
+
+from tarefa1_causal_mask    import demo_causal_mask
+from tarefa2_cross_attention import demo_cross_attention
+from tarefa3_autoregressive  import demo_autoregressive
+
+
+def separador(titulo: str) -> None:
+    largura = 60
+    print("\n" + "=" * largura)
+    print(f"  {titulo}")
+    print("=" * largura + "\n")
+
+
+def main() -> None:
+    print("\n" + "#" * 60)
+    print("  LABORATÓRIO 3 — IMPLEMENTANDO O DECODER")
+    print("  Tópicos em Inteligência Artificial — ICEV 2026.1")
+    print("  Aluno: Melquíades Neto")
+    print("#" * 60)
+
+    # ------------------------------------------------------------------
+    # Tarefa 1: Look-Ahead Mask
+    # ------------------------------------------------------------------
+    separador("TAREFA 1 — Look-Ahead Mask (Mascaramento Causal)")
+    demo_causal_mask(seq_len=5, d_k=64, seed=42)
+
+    # ------------------------------------------------------------------
+    # Tarefa 2: Cross-Attention
+    # ------------------------------------------------------------------
+    separador("TAREFA 2 — Cross-Attention (Ponte Encoder-Decoder)")
+    demo_cross_attention(seed=7)
+
+    # ------------------------------------------------------------------
+    # Tarefa 3: Loop Auto-Regressivo
+    # ------------------------------------------------------------------
+    separador("TAREFA 3 — Loop de Inferência Auto-Regressiva")
+    demo_autoregressive(seed=99)
+
+    print("#" * 60)
+    print("  Laboratório 3 concluído com sucesso.")
+    print("#" * 60 + "\n")
+
+
+if __name__ == "__main__":
+    main()
